@@ -2,3 +2,4 @@ asteroid
 jupyter
 librosa
 matplotlib
+soundfile

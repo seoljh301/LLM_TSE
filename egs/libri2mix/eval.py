@@ -33,7 +33,7 @@ parser.add_argument(
 parser.add_argument(
     "--task",
     type=str,
-    required=True,
+    default="sep_noisy",
     help="One of `enh_single`, `enh_both`, " "`sep_clean` or `sep_noisy`",
 )
 
@@ -79,7 +79,10 @@ def main(conf):
         ckpt = torch.load(conf["model_path"], map_location = torch.device('cpu')) 
         state_dict = {} 
         for k in ckpt['state_dict']: 
-            state_dict[k.split('.',1)[1]] = ckpt['state_dict'][k]
+            if k.startswith('model.base.'):
+                state_dict[k.replace('model.base.', '', 1)] = ckpt['state_dict'][k]
+            elif k.startswith('base.'):
+                state_dict[k.replace('base.', '', 1)] = ckpt['state_dict'][k]
         model.load_state_dict(state_dict)
     # Handle device placement
     if conf["use_gpu"]:
@@ -156,10 +159,10 @@ if __name__ == "__main__":
     arg_dic["sample_rate"] = train_conf["data"]["sample_rate"]
     arg_dic["train_conf"] = train_conf
 
-    if args.task != arg_dic["train_conf"]["data"]["task"]:
-        print(
-            "Warning : the task used to test is different than "
-            "the one from training, be sure this is what you want."
-        )
+    # if args.task != arg_dic["train_conf"]["data"]["task"]:
+    #     print(
+    #         "Warning : the task used to test is different than "
+    #         "the one from training, be sure this is what you want."
+    #     )
 
     main(arg_dic)

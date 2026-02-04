@@ -13,44 +13,69 @@ pip install -r requirements.txt
 The code was tested with Python 3.8.6.
 
 ## Running the experiments
-The directory `egs` contains a recipe for [Libri2mix dataset](https://github.com/JorisCos/LibriMix). Before running the recipe, modify `path.sh` file to contain path to the repository root. 
+While this repository provides a recipe for the Libri2mix dataset, current experiments are conducted using a custom dataset named **PORTE**. 
+
+**Note:** The PORTE dataset is currently private and will be publicly released in the future.
+
+### Environment Setup
+Before running any scripts, ensure the repository root is in your `PYTHONPATH`. You can configure `path.sh`:
+```bash
+# In path.sh
+PATH_TO_REPOSITORY="$(pwd)" # Update to the absolute path of this repo
+export PYTHONPATH=${PATH_TO_REPOSITORY}/src:$PYTHONPATH
 ```
-PATH_TO_REPOSITORY="<path-to-repo>"
+Then source it:
+```bash
+source path.sh
 ```
-Then follow the steps below in the recipe directory
-```
-cd egs/libri2mix
+Alternatively, set it directly in your shell:
+```bash
+export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 ```
 
 ### Preparing data
-To prepare lists of the data run
-```
+For the Libri2mix recipe, use:
+```bash
+cd egs/libri2mix
 local/prepare_data.sh <path-to-libri2mix-data>
 ```
-The `<path-to-libri2mix-data>` should contain `wav8k/min` subdirectories. The command will create `data` directory containing `csv` lists describing the data. The preparation of the data follows the data preparation from Asteroid. In addition, it creates a list mapping mixtures to enrollment utterances.
+The `<path-to-libri2mix-data>` should contain `wav8k/min` subdirectories.
+
+For the **PORTE** dataset (consisting of versions like `nm_v16/train` and `nm_v15/test`), the directory structure is organized as follows:
+
+```text
+PORTE_dataset/
+├── add/                # Enrollment/Auxiliary speech signals
+├── mixed/              # Mixture speech signals (input)
+├── trg/                # Target speech signals (ground truth)
+├── nm_path_v1X_*.csv   # CSV file containing absolute paths to audio files
+└── nm_v1X_*_2sp.csv    # CSV file containing metadata for 2-speaker mixtures
+```
+
+Ensure these metadata CSV files are present in your `--test_dir` or `--train_dir`.
 
 ### Training SpeakerBeam
-To train the SpeakerBeam model run
-```
-. ../../path.sh
+To train the SpeakerBeam model:
+```bash
+# Ensure you are in egs/libri2mix and PYTHONPATH is set
 python train.py --exp_dir exp/speakerbeam
 ```
-The training script will by default use parameters in `local/conf.yml`. To run with different parameters, you can either change the `local/conf.yml` file or pass them directly as command-line arguments, e.g.
-```
+Default parameters are in `local/conf.yml`. You can override them via CLI:
+```bash
 python train.py --exp_dir exp/speakerbeam_adaptlay15 --i_adapt_layer 15
 ```
-to change the position of the adaptation layer in the network.
 
-The training will create directory `exp/speakerbeam`. The final model after the training is finished is stored in `exp/speakerbeam/best_model.pth`. The training progress can be observed in Tensorboard using logs in `exp/speakerbeam/lightning_logs`.
+### Decoding and Evaluation
+To evaluate a trained model or a specific checkpoint on the test set:
+```bash
+python eval.py \
+  --test_dir /path/to/PORTE/test_data \
+  --task sep_noisy \
+  --model_path exp/speakerbeam/checkpoints/epoch=25-step=146250.ckpt \
+  --from_checkpoint 1 \
+  --out_dir exp/speakerbeam/out_test \
+  --exp_dir exp/speakerbeam \
+  --use_gpu 1
+```
 
-### Decoding and evaluating the performance
-To extract target speech signals on the test set with the trained model and evaluate performance, run
-```
-python eval.py --test_dir data/wav8k/min/test --task sep_noisy --model_path exp/speakerbeam/best_model.pth --out_dir exp/speakerbeam/out_best --exp_dir exp/speakerbeam --use_gpu=1
-```
-It is also possible to evaluate with an intermediate checkpoint, e.g.
-```
-python eval.py --test_dir data/wav8k/min/test --task sep_noisy --model_path exp/speakerbeam/checkpoints/epoch\=24-step\=115824.ckpt --from_checkpoint 1 --out_dir exp/speakerbeam/out_e24_s115824 --exp_dir exp/speakerbeam --use_gpu=1
-```
-
-In the output directory `exp/speakerbeam/out_best`, you can find the averaged results in `final_metrics.json` and the extracted audio files in `<out_dir>/out`.
+In the output directory, `final_metrics.json` contains the averaged results, and extracted audio files are saved in the `out/` subdirectory.
