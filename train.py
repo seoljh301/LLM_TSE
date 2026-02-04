@@ -1,15 +1,9 @@
-# Copyright (c) 2021 Brno University of Technology
-# Copyright (c) 2021 Nippon Telegraph and Telephone corporation (NTT).
-# All rights reserved
-# By Katerina Zmolikova, August 2021.
-
-# This code is based on Asteroid train.py, 
-# which is released under the following MIT license:
-# https://github.com/asteroid-team/asteroid/blob/master/LICENSE
-
 import os
 import argparse
 import json
+import yaml
+import sys
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -19,41 +13,48 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.callbacks import LearningRateMonitor
 
+# Setup paths to ensure src is discoverable
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.append(str(PROJECT_ROOT))
+sys.path.append(str(PROJECT_ROOT / "src"))
+
 from models.td_speakerbeam import TimeDomainSpeakerBeam
-from datasets.librimix_informed import LibriMixInformed
+from src.datasets.nm_dataset import NMDataset
+from src.llmtse_wrapper import LLMTSEWrapper
 from asteroid.engine.optimizers import make_optimizer
 from models.system import SystemInformed
 from asteroid.losses import singlesrc_neg_sisdr
+from datetime import datetime
 
 # Keys which are not in the conf.yml file can be added here.
 # In the hierarchical dictionary created when parsing, the key `key` can be
 # found at dic['main_args'][key]
 
-# By default train.py will use all available GPUs. The `id` option in run.sh
-# will limit the number of available GPUs for train.py .
+# By default train.py will use all available GPUs.
 parser = argparse.ArgumentParser()
-parser.add_argument("--exp_dir", default="exp/tmp", help="Full path to save best validation model")
+parser.add_argument("--exp_dir", default=None, help="Full path to save best validation model")
 
 def neg_sisdr_loss_wrapper(est_targets, targets):
-    return singlesrc_neg_sisdr(est_targets[:,0], targets[:,0]).mean()
+    # est_targets is usually (B, 1, T) or (B, T)
+    if est_targets.ndim == 3:
+        est_targets = est_targets.squeeze(1)
+    if targets.ndim == 3:
+        targets = targets.squeeze(1)
+    return singlesrc_neg_sisdr(est_targets, targets).mean()
 
 def main(conf):
-    train_set = LibriMixInformed(
-        csv_dir=conf["data"]["train_dir"],
-        task=conf["data"]["task"],
+    train_set = NMDataset(
+        data_dir=conf["data"]["train_dir"],
         sample_rate=conf["data"]["sample_rate"],
-        n_src=conf["data"]["n_src"],
         segment=conf["data"]["segment"],
-        segment_aux=conf["data"]["segment_aux"],
+        return_enroll=True
     )
 
-    val_set = LibriMixInformed(
-        csv_dir=conf["data"]["valid_dir"],
-        task=conf["data"]["task"],
+    val_set = NMDataset(
+        data_dir=conf["data"]["valid_dir"],
         sample_rate=conf["data"]["sample_rate"],
-        n_src=conf["data"]["n_src"],
         segment=conf["data"]["segment"],
-        segment_aux=conf["data"]["segment_aux"],
+        return_enroll=True
     )
 
     train_loader = DataLoader(
@@ -73,10 +74,27 @@ def main(conf):
     )
     conf["masknet"].update({"n_src": conf["data"]["n_src"]})
 
-    model = TimeDomainSpeakerBeam(
+    # Initialize Base Model
+    base_model = TimeDomainSpeakerBeam(
         **conf["filterbank"], **conf["masknet"], sample_rate=conf["data"]["sample_rate"],
         **conf["enroll"]
     )
+    
+    # Wrap with LLMTSEWrapper
+    # Note: These parameters can be added to conf.yml if needed
+    spk_dim = conf["enroll"]["adapt_enroll_dim"]
+    if conf["masknet"].get("skip_chan", 0) > 0:
+        spk_dim *= 2
+
+    model = LLMTSEWrapper(
+        base_model,
+        spk_dim=spk_dim,
+        text_model_name=conf.get("text_model", "meta-llama/Llama-2-7b-hf"),
+        use_lora=conf.get("use_lora", True),
+        load_in_4bit=conf.get("load_in_4bit", False),
+        fusion_type=conf.get("fusion_type", "film")
+    )
+
     optimizer = make_optimizer(model.parameters(), **conf["optim"])
     # Define scheduler
     scheduler = None
@@ -84,6 +102,12 @@ def main(conf):
         scheduler = ReduceLROnPlateau(optimizer=optimizer, factor=0.5, patience=conf['training']['reduce_patience'])
     # Just after instantiating, save the args. Easy loading in the future.
     exp_dir = conf["main_args"]["exp_dir"]
+    if exp_dir is None:
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        exp_dir = os.path.join("exp", timestamp)
+        conf["main_args"]["exp_dir"] = exp_dir
+        print(f"No exp_dir provided. Automatically creating: {exp_dir}")
+
     os.makedirs(exp_dir, exist_ok=True)
     conf_path = os.path.join(exp_dir, "conf.yml")
     with open(conf_path, "w") as outfile:
@@ -114,14 +138,17 @@ def main(conf):
 
     # Don't ask GPU if they are not available.
     gpus = -1 if torch.cuda.is_available() else None
-    distributed_backend = "ddp" if torch.cuda.is_available() else None
+    
+    # For newer PyTorch Lightning versions
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    devices = 1 # Change as needed
 
     trainer = pl.Trainer(
         max_epochs=conf["training"]["epochs"],
         callbacks=callbacks,
         default_root_dir=exp_dir,
-        gpus=gpus,
-        distributed_backend=distributed_backend,
+        accelerator=accelerator,
+        devices=devices,
         limit_train_batches=1.0,  # Useful for fast experiment
         gradient_clip_val=5.0,
     )
@@ -131,17 +158,17 @@ def main(conf):
     with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
         json.dump(best_k, f, indent=0)
 
+    # Save best model
     state_dict = torch.load(checkpoint.best_model_path)
     system.load_state_dict(state_dict=state_dict["state_dict"])
-    system.cpu()
-
+    
+    # Save using the wrapper's serialize method
     to_save = system.model.serialize()
     to_save.update(train_set.get_infos())
     torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
 
 
 if __name__ == "__main__":
-    import yaml
     from pprint import pprint
     from asteroid.utils import prepare_parser_from_dict, parse_args_as_dict
 
@@ -151,12 +178,7 @@ if __name__ == "__main__":
     with open("local/conf.yml") as f:
         def_conf = yaml.safe_load(f)
     parser = prepare_parser_from_dict(def_conf, parser=parser)
-    # Arguments are then parsed into a hierarchical dictionary (instead of
-    # flat, as returned by argparse) to facilitate calls to the different
-    # asteroid methods (see in main).
-    # plain_args is the direct output of parser.parse_args() and contains all
-    # the attributes in an non-hierarchical structure. It can be useful to also
-    # have it so we included it here but it is not used.
+    # Arguments are then parsed into a hierarchical dictionary
     arg_dic, plain_args = parse_args_as_dict(parser, return_plain_args=True)
     pprint(arg_dic)
     main(arg_dic)

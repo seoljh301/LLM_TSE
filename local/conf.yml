@@ -17,7 +17,7 @@ enroll:
   adapt_enroll_dim: 128
 # Training config
 training:
-  epochs: 200
+  epochs: 50
   batch_size: 6
   num_workers: 4
   half_lr: yes
@@ -32,9 +32,9 @@ optim:
 # Data config
 data:
   task: sep_noisy
-  train_dir: data/wav8k/min/train-100
-  valid_dir: data/wav8k/min/dev
-  sample_rate: 8000
+  train_dir: /nfs/data/speech-data/nm/nm_v16/train
+  valid_dir: /nfs/data/speech-data/nm/nm_v15/test
+  sample_rate: 16000
   n_src: 2
   segment: 3
   segment_aux: 3

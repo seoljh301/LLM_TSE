@@ -1,81 +1,70 @@
-# SpeakerBeam for neural target speech extraction
+# LLM-TSE: LLM-based Target Speech Extraction
 
-This repository contains an implementation of SpeakerBeam method for target speech extraction, made public during Interspeech 2021 tutorial.
+This repository contains an implementation of **LLM-TSE**, which extends the SpeakerBeam method to incorporate LLM-based text conditioning for target speech extraction.
 
-The code is based on the [Asteroid toolkit](https://github.com/asteroid-team/asteroid) for audio speech separation.
+The code is based on the [Asteroid toolkit](https://github.com/asteroid-team/asteroid) and utilizes a pre-trained Llama-2 model via LoRA for advanced text-to-audio conditioning.
 
 ## Requirements
 
 To install requirements:
-```
+```bash
 pip install -r requirements.txt
 ```
-The code was tested with Python 3.8.6.
+The code was tested with Python 3.10 and requires PyTorch with CUDA support for LLM inference.
+
+## Project Structure
+All core scripts are located in the root directory for ease of use:
+- `train.py`: Main training script for LLM-TSE.
+- `test.py`: Comprehensive evaluation script including SI-SDR, STOI, PESQ, and WER (via Whisper-v3).
+- `analyze_results.py`: Post-evaluation analysis grouped by overlap ratio.
+- `src/`: Core model architecture (LLMTSEWrapper, FiLMFusion, etc.) and datasets.
+- `local/conf.yml`: Default configuration for experiments.
 
 ## Running the experiments
-While this repository provides a recipe for the Libri2mix dataset, current experiments are conducted using a custom dataset named **PORTE**. 
+Currently, experiments are conducted using the **PORTE** custom dataset.
 
 **Note:** The PORTE dataset is currently private and will be publicly released in the future.
 
-### Environment Setup
-Before running any scripts, ensure the repository root is in your `PYTHONPATH`. You can configure `path.sh`:
-```bash
-# In path.sh
-PATH_TO_REPOSITORY="$(pwd)" # Update to the absolute path of this repo
-export PYTHONPATH=${PATH_TO_REPOSITORY}/src:$PYTHONPATH
-```
-Then source it:
-```bash
-source path.sh
-```
-Alternatively, set it directly in your shell:
-```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-```
-
-### Preparing data
-For the Libri2mix recipe, use:
-```bash
-cd egs/libri2mix
-local/prepare_data.sh <path-to-libri2mix-data>
-```
-The `<path-to-libri2mix-data>` should contain `wav8k/min` subdirectories.
-
-For the **PORTE** dataset (consisting of versions like `nm_v16/train` and `nm_v15/test`), the directory structure is organized as follows:
+### Dataset Structure (PORTE)
+For PORTE dataset versions (e.g., `nm_v16/train` and `nm_v15/test`), the directory structure is:
 
 ```text
 PORTE_dataset/
 ├── add/                # Enrollment/Auxiliary speech signals
 ├── mixed/              # Mixture speech signals (input)
 ├── trg/                # Target speech signals (ground truth)
-├── nm_path_v1X_*.csv   # CSV file containing absolute paths to audio files
-└── nm_v1X_*_2sp.csv    # CSV file containing metadata for 2-speaker mixtures
+├── nm_path_v1X_*.csv   # CSV file with absolute paths
+└── nm_v1X_*_2sp.csv    # Metadata for 2-speaker mixtures (contains overlap_ratio)
 ```
 
-Ensure these metadata CSV files are present in your `--test_dir` or `--train_dir`.
-
-### Training SpeakerBeam
-To train the SpeakerBeam model:
+### Environment Setup
+Add the repository root to your `PYTHONPATH`:
 ```bash
-# Ensure you are in egs/libri2mix and PYTHONPATH is set
-python train.py --exp_dir exp/speakerbeam
-```
-Default parameters are in `local/conf.yml`. You can override them via CLI:
-```bash
-python train.py --exp_dir exp/speakerbeam_adaptlay15 --i_adapt_layer 15
+export PYTHONPATH=$PYTHONPATH:$(pwd)
 ```
 
-### Decoding and Evaluation
-To evaluate a trained model or a specific checkpoint on the test set:
+### Training LLM-TSE
+To train the model using the default configuration (`local/conf.yml`):
 ```bash
-python eval.py \
-  --test_dir /path/to/PORTE/test_data \
-  --task sep_noisy \
-  --model_path exp/speakerbeam/checkpoints/epoch=25-step=146250.ckpt \
-  --from_checkpoint 1 \
-  --out_dir exp/speakerbeam/out_test \
-  --exp_dir exp/speakerbeam \
-  --use_gpu 1
+python train.py --exp_dir exp/llmtse_v1
+```
+You can override parameters like the fusion type or LoRA usage:
+```bash
+python train.py --exp_dir exp/llmtse_film --fusion_type film --use_lora 1
 ```
 
-In the output directory, `final_metrics.json` contains the averaged results, and extracted audio files are saved in the `out/` subdirectory.
+### Evaluation
+To evaluate a specific checkpoint on the test set:
+```bash
+python test.py \
+  --exp_dir exp/llmtse_v1 \
+  --ckpt_path exp/llmtse_v1/checkpoints/best_model.pth
+```
+This script will calculate SI-SDR, STOI, PESQ, and WER. Audio examples will be saved in `exp/llmtse_v1/examples`.
+
+### Analysis
+To generate a performance table grouped by overlap ratio:
+```bash
+python analyze_results.py --exp_dir exp/llmtse_v1
+```
+Results will be saved in `analysis_by_overlap.csv`.
