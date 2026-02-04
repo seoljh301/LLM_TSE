@@ -42,9 +42,11 @@ class LLMTextEncoder(nn.Module):
         
         try:
             # GPU Loading: Utilize A6000 VRAM for faster processing and LoRA training
+            # Force float16 to save memory (reduces usage from ~28GB to ~14GB)
             self.llm = AutoModel.from_pretrained(
                 self.model_name,
                 quantization_config=quantization_config,
+                torch_dtype=torch.float16,
                 trust_remote_code=True,
                 device_map="cuda" 
             )
@@ -55,10 +57,11 @@ class LLMTextEncoder(nn.Module):
         # Paper Alignment: Frozen LLM vs LoRA (SOTA)
         if self.use_lora:
             from peft import LoraConfig, get_peft_model
+            # Paper specifies: "apply the LoRA adapters to only modify keys and queries"
             lora_config = LoraConfig(
                 r=16, 
                 lora_alpha=32, 
-                target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+                target_modules=["q_proj", "k_proj"],
                 lora_dropout=0.05,
                 bias="none", 
                 task_type="FEATURE_EXTRACTION"

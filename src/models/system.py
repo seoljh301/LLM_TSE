@@ -10,7 +10,7 @@ class SystemInformed(System):
         # NMDataset returns: mix, tgt, enroll, text, gt_sentence
         if len(batch) == 5:
             inputs, targets, enrolls, texts, _ = batch
-            # Forward call to LLMTSEWrapper(wav, enrollment, texts)
+            # enrolls will be None because return_enroll=False in NMDataset
             est_targets = self(inputs, enrolls, texts=texts)
         else:
             # Fallback for standard 3-element batches

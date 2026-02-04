@@ -15,7 +15,7 @@ class LLMTSEWrapper(nn.Module):
                  use_lora: bool = False,
                  load_in_4bit: bool = False,
                  allow_text_only: bool = True,
-                 fusion_type: str = "film"): # 'film' or 'attention'
+                 fusion_type: str = "concat"): # 'concat', 'film' or 'dam'
         super().__init__()
         self.base = base
         # LLM Text Encoder
@@ -39,7 +39,9 @@ class LLMTSEWrapper(nn.Module):
         wav = _unsqueeze_to_3d(wav)
         tf_rep = self.base.forward_encoder(wav)
 
-        e_spk = self.base.auxiliary(enrollment) if enrollment is not None else None
+        # Check for None or empty tensor
+        is_enroll_present = enrollment is not None and enrollment.numel() > 0
+        e_spk = self.base.auxiliary(enrollment) if is_enroll_present else None
         
         # Text input handling
         e_txt = None

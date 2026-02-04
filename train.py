@@ -47,14 +47,14 @@ def main(conf):
         data_dir=conf["data"]["train_dir"],
         sample_rate=conf["data"]["sample_rate"],
         segment=conf["data"]["segment"],
-        return_enroll=True
+        return_enroll=False
     )
 
     val_set = NMDataset(
         data_dir=conf["data"]["valid_dir"],
         sample_rate=conf["data"]["sample_rate"],
         segment=conf["data"]["segment"],
-        return_enroll=True
+        return_enroll=False
     )
 
     train_loader = DataLoader(
@@ -89,10 +89,10 @@ def main(conf):
     model = LLMTSEWrapper(
         base_model,
         spk_dim=spk_dim,
-        text_model_name=conf.get("text_model", "meta-llama/Llama-2-7b-hf"),
+        text_model_name=conf.get("text_model", "meta-llama/Llama-2-7b-chat-hf"),
         use_lora=conf.get("use_lora", True),
         load_in_4bit=conf.get("load_in_4bit", False),
-        fusion_type=conf.get("fusion_type", "film")
+        fusion_type=conf.get("fusion_type", "concat")
     )
 
     optimizer = make_optimizer(model.parameters(), **conf["optim"])

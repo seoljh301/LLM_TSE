@@ -103,7 +103,7 @@ class NMDataset(Dataset):
                     tgt = np.pad(tgt, ((0,0), (0, pad_len)))
 
         # Enrollment
-        enroll = None
+        enroll = torch.tensor([]) # Default to empty tensor instead of None
         if self.return_enroll:
             spk_id = row["t_speaker_id"]
             opts = self.speakers.get(spk_id, [])

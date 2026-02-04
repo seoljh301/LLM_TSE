@@ -196,19 +196,44 @@ class FiLMFusion(nn.Module):
         gamma, beta = torch.chunk(params, 2, dim=-1)
         return gamma * e_spk + beta
 
+class ConcatFusion(nn.Module):
+    """
+    Simple Concatenation Fusion as specified in the LLM-TSE paper.
+    Cues are concatenated to form a multi-modal representation.
+    """
+    def __init__(self, dim):
+        super().__init__()
+        # Paper: "transform the text cue and audio cue embeddings 
+        # into the same dimensional through two linear projection layers"
+        # Since they are already projected to 'dim' in their respective encoders,
+        # we can directly concatenate or add extra projections if needed.
+        # Here we add a projection to ensure they are well-integrated 
+        # and match the base model's expected dimension if necessary.
+        self.proj = nn.Linear(dim * 2, dim) 
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, e_spk, e_txt):
+        # e_spk: (B, D), e_txt: (B, D)
+        fused = torch.cat([e_spk, e_txt], dim=-1) # (B, 2D)
+        # We project back to D to maintain compatibility with SpeakerBeam's adapt_enroll_dim
+        return self.norm(self.proj(fused))
+
 class CueFusion(nn.Module):
     """
     Wrapper class compatible with LLM-TSE interface.
-    Defaults to FiLM Fusion.
+    Defaults to Concatenation Fusion.
     """
-    def __init__(self, dim: int, fusion_type="film"):
+    def __init__(self, dim: int, fusion_type="concat"):
         super().__init__()
+        self.fusion_type = fusion_type
         if fusion_type == "dam":
             self.fusion = DAMFusion(dim)
         elif fusion_type == "film":
             self.fusion = FiLMFusion(dim)
+        elif fusion_type == "concat":
+            self.fusion = ConcatFusion(dim)
         else:
-            self.fusion = FiLMFusion(dim)
+            self.fusion = ConcatFusion(dim)
             
     def forward(self, e_spk, e_txt):
         return self.fusion(e_spk, e_txt)
